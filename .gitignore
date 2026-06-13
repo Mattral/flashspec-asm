@@ -1,0 +1,40 @@
+# Build artifacts
+build/
+*.o
+*.so
+*.a
+*.out
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+*.egg
+.eggs/
+
+# Hypothesis / pytest
+.hypothesis/
+.pytest_cache/
+*.prof
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Benchmark results are checked IN (not ignored) — they're the record
+# bench/results/   <-- do NOT add this
+
+# Wheel builds
+wheelhouse/
+cibuildwheel_*.log
