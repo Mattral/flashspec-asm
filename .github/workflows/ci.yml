@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  correctness:
+    name: Correctness suite (Phase 1+)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install flashspec hypothesis pytest numpy torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Run correctness suite (reference)
+        run: pytest tests/test_correctness.py -v --tb=short
+
+  build-asm:
+    name: Assemble + link (Phase 3+)
+    runs-on: ubuntu-latest
+    # This job is a no-op until src/kernel_avx2.asm is populated (Phase 3).
+    # It's scaffolded now so the CI config doesn't need restructuring later.
+    if: false   # Remove this line when Phase 3 begins
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install NASM and build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y nasm
+
+      - name: Build shared object
+        run: make
+
+      - name: Run correctness suite (all backends)
+        run: pytest tests/ -v --tb=short
+
+  benchmark:
+    name: Benchmark (Phase 5+)
+    runs-on: ubuntu-latest
+    # Only runs on main pushes after Phase 5 is complete.
+    # Benchmark regressions do NOT fail CI — they are reported as artifacts.
+    if: false   # Remove this line when Phase 5 begins
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pip install flashspec numpy torch
+
+      - name: Run benchmark harness
+        run: python bench/bench_harness.py --output bench/results/
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: bench/results/
