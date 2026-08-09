@@ -1,0 +1,19 @@
+FlashSpec-ASM Phase 5 Benchmark
+Generated: 2026-08-12T06:20:06.722461
+Compiler: GCC 13.3.0, -O3 -march=native -fPIC
+Assembler: NASM 2.16.01, -f elf64 -O2
+Platform: Linux x86-64, AVX2 confirmed
+Measurement: perf_counter_ns, 50 warmup + 2000 iterations
+
+Scenario      NumPy_mean  NumPy_med    C_mean    C_med   ASM_mean   ASM_med  vs_NumPy    vs_C
+  V=1024          7738.4     6791.0    2650.1   2517.0     1569.9    1398.0     4.93x   1.69x
+  V=4096         11959.3    11214.0    7249.6   6624.0     2233.3    2152.0     5.36x   3.25x
+  V=32000        59906.3    55315.0   42993.4  41355.0     8864.5    8528.0     6.76x   4.85x
+  V=128256      248893.5   238569.5  184314.9 177665.5    42464.3   39720.0     5.86x   4.34x
+
+BUG LOG (Phase 3):
+  v1: tail elements accumulated into xmm4 (low lane of ymm4).
+      hreduce summed all 8 ymm4 lanes including stale upper lanes.
+      Result: denom double-counted for V % 8 != 0. Detected by correctness suite.
+  v2: tail accumulated into separate xmm6; hreduce collapses ymm4 separately,
+      then adds xmm6. All 13 cross-size cases pass at ATOL=1e-5.
