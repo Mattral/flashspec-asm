@@ -45,7 +45,7 @@ gives a direct throughput gain.
 | V=32000 | 43295 ns | 41334 ns | 1.27× faster |
 | V=128256 | 181431 ns | 174487 ns | 1.37× faster |
 
-Raw results: `bench/results/phase2_20260812.txt`
+Raw results: `bench/results/phase2_c_baseline.txt`
 
 **The C baseline is already fast.** At large V (32k–128k), both NumPy and C
 are memory-bandwidth bound — the gap shrinks because the bottleneck shifts

@@ -38,7 +38,7 @@ Profiled on CPU (the target for the ASM kernel) across five realistic scenarios:
 
 **`residual_distribution` dominates at 92.5% of pipeline time on average.**
 
-Raw numbers saved in `bench/results/phase0_20260811_071136.txt`.
+Raw numbers saved in `bench/results/phase0.txt`.
 
 ## Why `residual_dist` Dominates
 
