@@ -1,0 +1,27 @@
+# GitHub Linguist overrides
+# https://github.com/github-linguist/linguist/blob/master/docs/overrides.md
+#
+# This is an Assembly + C project. The Python files are test infrastructure,
+# correctness documentation, and profiling harnesses — not the product.
+# Mark them accordingly so the language bar reflects the actual codebase.
+
+# Core deliverables — counted normally
+src/kernel_avx2.asm    linguist-detectable=true
+src/shim.c             linguist-detectable=true
+src/cpuid.c            linguist-detectable=true
+include/flashspec_asm.h linguist-detectable=true
+bindings/python/flashspec_asm.py linguist-detectable=true
+
+# Correctness infrastructure — mark as documentation
+# These are the ground truth reference and test suite; important but not
+# the language the project is written in.
+reference/reference_op.py        linguist-documentation=true
+tests/test_correctness.py        linguist-documentation=true
+tests/fuzz/fuzz_residual_dist.c  linguist-documentation=true
+
+# Benchmark and profiling harnesses — generated/tooling
+bench/bench_harness.py   linguist-generated=true
+bench/profile_phase0.py  linguist-generated=true
+
+# Docs
+docs/**   linguist-documentation=true
