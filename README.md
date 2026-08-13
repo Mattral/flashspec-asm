@@ -28,7 +28,7 @@ FlashSpec uses a Triton kernel for this on GPU. On the CPU fallback path,
 Phase 0 profiling revealed that `residual_distribution` accounts for **92.5%
 of verification pipeline time on average** — ranging from 76.6% at
 `(B=1, γ=4, V=32000)` to effectively 100% at `(B=8, γ=4, V=128256)`.
-Full profiling data: [`bench/results/phase0_20260811_071136.txt`](bench/results/phase0_20260811_071136.txt).
+Full profiling data: [`bench/results/phase0.txt`](bench/results/phase0.txt).
 
 This repo hand-implements that single operation in AVX2 NASM assembly, exposes
 it through a C ABI shim, and wires it into FlashSpec as an opt-in backend.
@@ -179,7 +179,7 @@ Input: single `(V,)` float32 slice, Dirichlet-sampled, seed 0.
 | V=32,000 *(LLaMA-2)* | 59,906 ns | 42,993 ns | 8,865 ns | 6.76× | 4.85× |
 | V=128,256 *(LLaMA-3)* | 248,894 ns | 184,315 ns | 42,464 ns | 5.86× | 4.34× |
 
-Dated raw results (mean, median, per-size): [`bench/results/phase5_20260812.txt`](bench/results/phase5_20260812.txt).
+Dated raw results (mean, median, per-size): [`bench/results/phase5_benchmark.txt`](bench/results/phase5_benchmark.txt).
 
 **Why the gains scale with V:** At small V (1,024), loop setup and tail
 handling are a non-trivial fraction of total time, compressing the headroom.
