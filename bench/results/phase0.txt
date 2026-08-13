@@ -1,5 +1,5 @@
 FlashSpec-ASM Phase 0 Profiling Report
-Generated: 2026-08-11T07:11:36.210663
+Generated: [redacted]
 Platform: CPU (torch 2.13.0+cu130, numpy 2.4.4)
 
 NOTE: This is CPU-path profiling. The Triton kernel runs on GPU;

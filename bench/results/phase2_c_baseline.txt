@@ -1,5 +1,5 @@
 FlashSpec-ASM Phase 2 Baseline Benchmark
-Generated: 2026-08-12
+Generated: [redacted]
 Compiler: GCC 13.3.0, flags: -O3 -march=native -fPIC
 Platform: Linux x86-64, AVX2 confirmed (cpu_supports_avx2() = True)
 Measurement: perf_counter_ns, 50 warmup + 2000 iterations per scenario

@@ -1,5 +1,5 @@
 FlashSpec-ASM Phase 5 Benchmark
-Generated: 2026-08-12T06:20:06.722461
+Generated: [redacted]
 Compiler: GCC 13.3.0, -O3 -march=native -fPIC
 Assembler: NASM 2.16.01, -f elf64 -O2
 Platform: Linux x86-64, AVX2 confirmed
