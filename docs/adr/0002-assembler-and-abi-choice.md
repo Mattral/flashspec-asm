@@ -60,7 +60,7 @@ kernel_avx2.o: src/kernel_avx2.asm
 
 # C shim → object
 shim.o: src/shim.c include/flashspec_asm.h
-    cc -O2 -march=native -fPIC -c src/shim.c -o shim.o
+    cc -O3 -march=native -fPIC -c src/shim.c -o shim.o
 
 # Link into shared object
 libflashspec_asm.so: kernel_avx2.o shim.o

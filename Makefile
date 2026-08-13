@@ -5,7 +5,7 @@
 CC      := cc
 NASM    := nasm
 
-CFLAGS  := -O2 -march=native -fPIC -Wall -Wextra \
+CFLAGS  := -O3 -march=native -fPIC -Wall -Wextra \
             -I include/
 NASMFLAGS := -f elf64 -O2
 
