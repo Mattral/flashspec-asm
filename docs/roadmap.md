@@ -55,16 +55,16 @@ ADR to be written once integration PR is opened against flashspec.
 | Phase | Description | Status |
 |---|---|---|
 | 0 | Profile verification step; identify hot-path op | ✅ Done — `residual_dist` at 92.5% avg |
-| 1 | NumPy/PyTorch reference + property-based test suite | 🔄 In progress |
-| 2 | Naive C baseline (`-O3 -march=native`), benchmarked | ⬜ Not started |
-| 3 | Hand-written AVX2 NASM kernel | ⬜ Not started |
-| 4 | C shim + Python bindings (`ctypes`/`cffi`) | ⬜ Not started |
-| 5 | Cycle-level benchmark (C vs Triton vs ASM) | ⬜ Not started |
-| 6 | ADRs, README, GitHub release, PyPI wheel | ⬜ Not started |
+| 1 | NumPy/PyTorch reference + property-based test suite | ✅ Done — 34 tests, all green |
+| 2 | Naive C baseline (`-O3 -march=native`), benchmarked | ✅ Done — numbers in `bench/results/phase2_*.txt` |
+| 3 | Hand-written AVX2 NASM kernel | ✅ Done — bug found & fixed; 13/13 correctness cases |
+| 4 | C shim + Python bindings (`ctypes`/`cffi`) | ✅ Done — dispatch wired, ABI version check |
+| 5 | Cycle-level benchmark (C vs ASM) | ✅ Done — 4.85× over C at V=32k; see `bench/results/phase5_*.txt` |
+| 6 | ADRs, README, writeup | ✅ Done — 4 ADRs, writeup ready for publication |
 | 7 | Integration PR into `flashspec` as optional dep | ⬜ Post-v1 |
 | 8 | Stretch: CPUID dispatch for AVX-512 or ARM NEON | ⬜ Post-v1 |
 
-## Phase 0 finding (2026-08-11)
+## Phase 0 finding
 
 Profiled all sub-operations of the verification pipeline across 5 realistic
 parameter scenarios (B=1–8, γ=4–8, V=32000–128256):
