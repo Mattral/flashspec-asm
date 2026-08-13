@@ -1,6 +1,6 @@
 # FlashSpec-ASM: Hand-writing an AVX2 Kernel for Speculative Decoding
 
-*Status: draft — sections marked [TBD] are placeholders to fill after each phase completes.*
+*Status: complete — all phases shipped. This draft is ready for Medium publication.*
 
 ---
 
@@ -17,9 +17,9 @@ assembly against a real benchmark target, document every decision I made, and pu
 the actual numbers, including the ones where the compiler wins.
 
 This is a systems-programming portfolio piece first. The pitch is: here is a
-hand-written AVX2 kernel, tested with property-based tests and fuzz before a single
-benchmark was run, benchmarked honestly against compiler-optimised C and a real Triton
-kernel, with every non-obvious decision written up in an ADR. Not "I beat Triton."
+hand-written AVX2 kernel, tested with property-based tests before a single benchmark
+was run, benchmarked honestly against compiler-optimised C, with every non-obvious
+decision written up in an ADR. Not "I beat Triton."
 
 ---
 
@@ -51,7 +51,7 @@ scalar pairs. At V=128256 (LLaMA-3), the residual step consumed essentially all 
 measured CPU time.
 
 This is memory-bandwidth bound, not compute bound. That profile is exactly right for
-AVX2: the 8-wide `vsubps` + `vmaxps` + horizontal-sum + `vdivps` loop reduces the
+AVX2: the 8-wide `vsubps` + `vmaxps` + horizontal-sum + `vmulps` loop reduces the
 iteration count by 8× versus scalar, and sequential stride-1 access lets hardware
 prefetch fill the pipeline.
 
@@ -59,10 +59,28 @@ prefetch fill the pipeline.
 
 ## Phase 0: Profiling
 
-[TBD — paste real `perf stat` output here once Phase 0 is run on the benchmark machine]
+Profiler: `time.perf_counter_ns` on CPU (torch 2.13.0, numpy 2.4.4),
+500 iterations per op, 5 scenarios. Full data: `bench/results/phase0_*.txt`.
 
-Profiler: `time.perf_counter_ns` on CPU (no GPU), 500 iterations per op, 5 scenarios.
-Raw results in `bench/results/phase0_*.txt`.
+My prior assumption going in was that `acceptance_criterion` would dominate — it runs
+on every draft token and involves an `exp()` call. It was wrong. The per-scenario
+breakdown:
+
+| Scenario | residual_dist % | acceptance % |
+|---|---|---|
+| B=1, γ=4, V=32k | 76.6% | 2.3% |
+| B=1, γ=8, V=32k | 96.5% | 0.9% |
+| B=8, γ=4, V=32k | 94.7% | 0.2% |
+| B=8, γ=8, V=32k | 94.0% | 0.1% |
+| B=8, γ=4, V=128k | ~100% | ~0% |
+
+The reason the acceptance criterion barely registers: it operates on `(B, γ)` scalar
+log-probs already gathered — at most 64 floats. The residual operates on `(B, V)`
+probability slices — 32k to 128k floats. The vocabulary dimension swamps everything
+else.
+
+This is why you measure before you commit to a kernel. The assumption was wrong by
+two orders of magnitude.
 
 ---
 
@@ -79,94 +97,177 @@ scale invariance, batched/single-slice agreement.
 
 **Explicit edge cases:** NaN contract (AVX2 `vmaxps` silently zeros NaN — documented,
 not a bug), denom guard (prevents divide-by-zero when all diffs ≤ 0), V=1 degenerate
-case, V=128256 large vocab, point masses, extreme magnitudes near float32 subnormal.
+case, V=128256 large vocab, point masses, extreme magnitudes near float32 subnormal,
+and non-multiples of 8 (V=7, 9, 15, 16, 17) — the size class that caught the Phase 3
+tail bug.
 
 **Pipeline smoke tests:** shape contracts, first_rejection bounds, forced all-accept
 (u=0) and all-reject (u=1) paths.
 
 34 tests. All green before Phase 2 was started.
 
-One thing I found during Phase 1: the `vmaxps(NaN, 0)` behaviour is a real semantic
-difference between the NumPy reference and the AVX2 kernel. NumPy returns NaN;
-AVX2 returns 0. I documented this in ADR 0001 and in the test file rather than
-papering it over. The kernel's behaviour is correct for this use case (NaN in
-log-probs indicates an upstream bug, not a valid probability state), but it's the
-kind of thing that bites you if you don't write it down.
+One thing that came out of Phase 1: `vmaxps(NaN, 0)` is a real semantic difference
+between NumPy and AVX2. NumPy returns NaN per Python semantics; AVX2 returns 0.0 per
+Intel SDM Vol. 2B §4.3. I documented this in ADR 0001 and left a named `pass` test
+with a comment rather than papering over the divergence. The kernel's behaviour is
+correct for this use case — NaN in a log-prob vector means an upstream fault, not a
+valid probability state — but undocumented divergences from the reference are how
+production bugs hide.
 
 ---
 
 ## Phase 2: C baseline
 
-[TBD — fill in after Phase 2 is complete]
-
-Naive C, compiled `-O3 -march=native`. Two-pass: accumulate clamped diffs into the
-output buffer, then normalise in a second pass. Deliberately not hand-optimised —
+Naive C, compiled `-O3 -march=native -fPIC`. Two-pass: accumulate clamped diffs into
+the output buffer, then normalise in a second pass. Deliberately not hand-optimised —
 the point is to see what a competent compiler does automatically.
 
-What the compiler generated: [TBD — paste relevant godbolt / objdump output]
+GCC 13.3 auto-vectorised both loops to 32-byte ymm registers (confirmed via
+`-fopt-info-vec`). But inspecting the generated assembly (`-S` output) revealed two
+specific weaknesses:
 
-Baseline numbers: [TBD]
+**1. Horizontal reduction:** GCC serialises the ymm accumulator via repeated scalar
+`vaddss` — 8 sequential additions — rather than a `vhaddps` + `vextractf128` +
+`vaddss` tree that collapses 8 partial sums in 3 instructions.
+
+**2. Normalisation pass:** GCC emits scalar `vdivss` (~14 cycles throughput, 1
+element) then `vbroadcastss`, rather than `vbroadcastss` of the reciprocal followed
+by `vmulps` (~5 cycles throughput, 8 elements).
+
+Baseline numbers:
+
+| V | C mean | C median |
+|---|---|---|
+| 1,024 | 2,650 ns | 2,366 ns |
+| 4,096 | 7,286 ns | 6,489 ns |
+| 32,000 | 42,993 ns | 41,334 ns |
+| 128,256 | 184,315 ns | 174,487 ns |
+
+These are the numbers the kernel has to beat. They were recorded and checked into
+`bench/results/phase2_*.txt` before Phase 3 was started.
 
 ---
 
 ## Phase 3: The AVX2 kernel
 
-[TBD — fill in after Phase 3 is complete]
+Two-pass, matching the C structure but fixing both identified weaknesses.
 
-Two-pass strategy:
+**Pass 1:** 8 floats per iteration via ymm registers. The core loop body:
 
-**Pass 1:** Process 8 floats per iteration using ymm registers.
 ```nasm
-vmovups ymm_p,    [rdi + rax*4]
-vmovups ymm_q,    [rsi + rax*4]
-vsubps  ymm_diff, ymm_p,    ymm_q
-vmaxps  ymm_cl,   ymm_diff, ymm_zero
-vaddps  ymm_sum,  ymm_sum,  ymm_cl
-vmovups [rdx + rax*4], ymm_cl
+vmovups ymm0, [rdi + rax*4]    ; load p[i..i+7]
+vmovups ymm1, [rsi + rax*4]    ; load q[i..i+7]
+vsubps  ymm2, ymm0, ymm1       ; diff = p - q
+vmaxps  ymm3, ymm2, ymm5       ; clamp = max(0, diff)  [ymm5 = 0.0]
+vaddps  ymm4, ymm4, ymm3       ; accumulate into ymm sum
+vmovups [rdx + rax*4], ymm3    ; store clamped (un-normalised)
+add     rax, 8
 ```
 
-**Horizontal reduction:** [TBD — vhaddps vs. shuffle+add decision]
+**Horizontal reduction (the targeted fix):** Rather than GCC's 8 scalar `vaddss`,
+the kernel uses a 3-instruction tree:
 
-**Pass 2:** Normalise stored values by the computed denom.
+```nasm
+vhaddps ymm4, ymm4, ymm4       ; pairwise within each 128-bit lane
+vhaddps ymm4, ymm4, ymm4       ; pairs again
+vextractf128 xmm0, ymm4, 1     ; upper lane
+vaddss  xmm0, xmm0, xmm4      ; final scalar total in xmm0
+```
 
-**Tail handling:** Scalar loop for `V % 8` remainder elements.
+**Normalisation (the second fix):** Reciprocal broadcast + multiply instead of
+scalar divide:
 
-**`vzeroupper`** on exit to prevent AVX→SSE transition penalty on Intel CPUs.
+```nasm
+vdivss  xmm0, [one_f], xmm6    ; 1.0 / sum  (one scalar divide)
+vbroadcastss ymm7, xmm0        ; broadcast to all 8 lanes
+; ... pass 2 loop:
+vmulps  ymm0, ymm0, ymm7       ; 8-wide multiply
+```
 
-Bugs found during Phase 3: [TBD — this section will have something in it]
+**Tail handling:** Scalar loop for `V % 8` remainder elements, using a
+*separate* `xmm6` accumulator — not `xmm4`/`ymm4`. This is where the bug was.
+
+**`vzeroupper` on exit** to prevent the AVX→SSE transition penalty on Intel
+microarchitectures (Haswell/Broadwell particularly).
+
+### The bug I found
+
+**v1** accumulated tail elements via `vaddss xmm4, xmm4, xmm3`. This writes to
+`xmm4`, which is the low 128-bit lane of `ymm4` — the vectorised accumulator. The
+horizontal reduction then summed all 8 lanes of `ymm4`, double-counting the
+vectorised partial sums already stored in the upper 7 lanes.
+
+Symptom: outputs summed to > 1.0 at V=9, V=15, V=17. Caught immediately by the
+correctness suite. The fix (v2): use `xmm6` as a completely separate scalar
+accumulator; combine with the hreduce result via `vaddss xmm6, xmm6, xmm0` after
+the reduction.
+
+This is the class of bug that correctness-first discipline exists to catch. A fast
+wrong kernel is strictly worse than no kernel.
 
 ---
 
 ## Benchmark results
 
-[TBD — fill in after Phase 5 is complete]
+Three-way: NumPy reference, GCC 13.3 `-O3 -march=native`, hand-written AVX2 NASM.
+Platform: Linux x86-64, AVX2 confirmed. `perf_counter_ns`, 50 warmup + 2000 iterations.
 
-| Scenario | NumPy | C -O3 | AVX2 ASM | vs C |
-|---|---|---|---|---|
-| V=32k, B=1 | | | | |
-| V=32k, B=8 | | | | |
-| V=128k, B=8 | | | | |
+| V | NumPy | C -O3 | AVX2 | vs NumPy | vs C |
+|---|---|---|---|---|---|
+| 1,024 | 7,738 ns | 2,650 ns | 1,570 ns | 4.93× | **1.69×** |
+| 4,096 | 11,959 ns | 7,250 ns | 2,233 ns | 5.36× | **3.25×** |
+| 32,000 | 59,906 ns | 42,993 ns | 8,865 ns | 6.76× | **4.85×** |
+| 128,256 | 248,894 ns | 184,315 ns | 42,464 ns | 5.86× | **4.34×** |
 
-Hardware: [TBD]
-Compiler: [TBD]
-Measurement: `perf stat -e cycles,instructions,cache-misses` + `rdtsc`
-Methodology: 20 warmup iterations, 1000 measured, taskset -c 0
+**Why the gains scale with V:** At V=1024, loop setup and the tail handler are a
+non-trivial fraction of total time. At V=32000–128256, the vectorised loop dominates
+and the two targeted GCC weaknesses account for a larger share of the cycle budget.
+The V=128256 case is slightly less efficient than V=32000 because the 500 KB output
+buffer exceeds L2 on most CPUs (~256–512 KB), adding L3 latency on the pass 2 sweep.
 
-**Cases where ASM does not win:** [TBD — expected at small V where loop overhead
-dominates or the compiler auto-vectorises aggressively]
+**What was forecast vs. what happened:** ADR 0004 conservatively predicted V=1024
+might not beat C due to loop overhead. It beat C by 1.69×. The forecast was wrong in
+the optimistic direction — worth noting because honest forecasting is part of the
+methodology.
+
+**For production measurement:** re-run with `taskset -c 0 perf stat -e cycles,
+instructions,cache-misses` to pin the process and count hardware events. The
+`perf_counter_ns` numbers include scheduler jitter and are adequate for relative
+comparison but not absolute cycle accounting.
 
 ---
 
 ## What I'd do differently
 
-[TBD — written after Phase 6]
+**Measure the horizontal reduction in isolation.** The `vhaddps` tree operates within
+128-bit lanes and requires an `vextractf128` step — a minor but real latency hit on
+some microarchitectures. An alternative using `vpermf32` + `vaddps` shuffles might
+be faster on specific CPUs. I didn't microbenchmark the reduction separately; I
+measured the full kernel. For a production kernel that needs to squeeze the last few
+percent, the reduction deserves its own `rdtsc` harness.
+
+**Consider alignment.** The kernel uses `vmovups` (unaligned loads) throughout. On
+modern CPUs with cache-line-aligned inputs, `vmovups` and `vmovaps` have identical
+throughput. But callers passing non-aligned buffers pay a penalty. A 32-byte alignment
+requirement on `p`, `q`, and `out` — enforced in the Python binding with
+`np.ascontiguousarray` + a posix_memalign path — would let the kernel use `vmovaps`
+safely and document the contract explicitly.
+
+**Ship the `perf stat` run as part of CI.** The `perf_counter_ns` methodology is
+reproducible but noisy. A CI job that runs `perf stat` with process pinning would
+give cycle-accurate numbers across builds, making performance regressions visible
+before they reach main. This requires a non-containerised runner with `perf` access
+— not free, but worth it for a kernel repo.
+
+**Write the fuzz target.** The `tests/fuzz/` directory exists but is empty.
+A `libFuzzer` harness comparing the C baseline and ASM kernel byte-by-byte on random
+inputs would catch any remaining edge-case divergence that Hypothesis didn't surface.
+It's a 50-line C file; there's no good reason it isn't there.
 
 ---
 
 ## Related
 
 - [FlashSpec on PyPI](https://pypi.org/project/flashspec/)
-- ADR 0001: Kernel selection
-- ADR 0002: Assembler and ABI choice
-- ADR 0003: AVX2 baseline vs. AVX-512
-- [KANX writeup](https://medium.com/@mattral-lifelong-learning) — same format
+- [KANX](https://github.com/Mattral/KANX) — same writeup format
+- ADR 0001–0004 in `docs/adr/`
