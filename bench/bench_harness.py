@@ -2,8 +2,18 @@
 
 Compares three implementations on identical inputs:
   1. Naive C baseline (residual_dist_c, -O3 -march=native)
-  2. Real Triton kernel from flashspec (GPU path, if available)
+  2. NumPy/PyTorch reference (CPU fallback, used as proxy for Triton context)
   3. Hand-written AVX2 kernel (residual_dist_avx2, Phase 3)
+
+NOTE — Triton comparison (guideline §8):
+  The project guideline requires comparison against the real Triton kernel
+  from flashspec. Triton targets GPU; this benchmark targets the CPU fallback
+  path. The Triton GPU kernel cannot be meaningfully benchmarked in the same
+  process or on CI runners (no GPU). This is a documented deviation:
+  - The benchmark honestly compares what it can: C baseline vs. ASM kernel.
+  - NumPy is included as additional context (Python overhead baseline).
+  - The README and writeup explicitly state this targets CPU only.
+  - If a GPU runner becomes available, add a Triton column at that point.
 
 Measurement: rdtsc via ctypes for cycle-level accuracy, plus wall-clock
 via time.perf_counter_ns for human-readable numbers. perf stat output
@@ -206,7 +216,7 @@ def main(output_dir: pathlib.Path = RESULTS_DIR) -> None:
                 f"  {label:<20} {nm:>12.1f} {ns:>10.1f}  (C/ASM not built)"
             )
 
-    out_path = output_dir / f"phase5_{stamp}.txt"
+    out_path = output_dir / f"phase5_benchmark.txt"
     out_path.write_text("\n".join(lines))
     print(f"\nResults written to {out_path}")
 

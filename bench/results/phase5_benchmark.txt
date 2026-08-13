@@ -1,5 +1,5 @@
 FlashSpec-ASM Phase 5 Benchmark
-Generated: [redacted]
+Platform: Linux x86-64, GCC 13.3, AVX2 confirmed
 Compiler: GCC 13.3.0, -O3 -march=native -fPIC
 Assembler: NASM 2.16.01, -f elf64 -O2
 Platform: Linux x86-64, AVX2 confirmed
@@ -17,3 +17,5 @@ BUG LOG (Phase 3):
       Result: denom double-counted for V % 8 != 0. Detected by correctness suite.
   v2: tail accumulated into separate xmm6; hreduce collapses ymm4 separately,
       then adds xmm6. All 13 cross-size cases pass at ATOL=1e-5.
+NOTE: Triton comparison not included — Triton targets GPU; this benchmark
+measures the CPU fallback path only. Documented deviation from guideline §8.
