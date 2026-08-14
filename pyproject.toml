@@ -32,28 +32,23 @@ Repository = "https://github.com/Mattral/flashspec-asm"
 [project.optional-dependencies]
 dev = ["pytest", "hypothesis", "torch"]
 
-[tool.setuptools]
-package-dir = {"" = "bindings"}
-packages = ["python"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["flashspec_asm_kernel*"]
 
 [tool.setuptools.package-data]
-"python" = ["*.so", "*.pyd"]
+"flashspec_asm_kernel" = ["*.so", "*.pyd"]
 
 # ---------------------------------------------------------------------------
 # cibuildwheel configuration
 # ---------------------------------------------------------------------------
 [tool.cibuildwheel]
-# Linux x86-64 only for v1 (matches SysV AMD64 ABI target)
 build = "cp39-manylinux_x86_64 cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64"
 skip = "*-musllinux*"
 
-# Install NASM inside the manylinux container before building
 before-all = "yum install -y nasm || apt-get install -y nasm"
-
-# Build the .so inside the wheel
 before-build = "make clean && make"
 
-# Run the correctness suite inside the wheel environment after building
 test-requires = ["pytest", "hypothesis", "numpy", "torch"]
 test-command = "pytest {project}/tests/test_correctness.py -q"
 

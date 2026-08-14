@@ -33,7 +33,8 @@ build/%.o: src/%.c $(HEADER) | build/
 
 $(LIB): $(OBJ_ASM) $(OBJ_C)
 	$(CC) -shared -o $@ $^
-	# Also copy into bindings/python/ for wheel packaging
+	# Copy into both locations for wheel packaging and legacy dev path
+	cp $(LIB) flashspec_asm_kernel/$(LIB)
 	cp $(LIB) bindings/python/$(LIB)
 
 test:

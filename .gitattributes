@@ -29,3 +29,5 @@ docs/**   linguist-documentation=true
 # Package config — counted normally
 pyproject.toml linguist-detectable=true
 bindings/python/__init__.py linguist-detectable=true
+flashspec_asm_kernel/__init__.py linguist-detectable=true
+flashspec_asm_kernel/flashspec_asm.py linguist-detectable=true
