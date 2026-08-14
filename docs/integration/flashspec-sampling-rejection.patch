@@ -1,0 +1,100 @@
+--- a/flashspec/sampling/rejection.py
++++ b/flashspec/sampling/rejection.py
+@@ -1,6 +1,8 @@
+ """Standard speculative-sampling acceptance/rejection (Algorithm 1).
+ 
+-This module implements **exactly** Algorithm 1 from Leviathan et al. (2023),
++This module implements **exactly** Algorithm 1 from Leviathan et al. (2023).
++The residual distribution computation routes through the optional
++``flashspec-asm-kernel`` accelerator when installed (CPU path only).
+ 
+ The acceptance criterion and residual distribution are immutable by AGENTS.md §2.1.
+ Do NOT alter the residual computation below without a corresponding paper revision.
+@@ -12,6 +14,37 @@ import torch
+ from flashspec.utils.logging import get_logger
+ 
+ __all__ = ["rejection_sample"]
++
++# ---------------------------------------------------------------------------
++# Optional ASM accelerator backend
++#
++# flashspec-asm-kernel ships as a separate pip package:
++#   pip install flashspec[asm]        # installs flashspec-asm-kernel
++#   pip install flashspec             # pure-Python path, unchanged
++#
++# The kernel accelerates residual_dist on the CPU path only. The Triton GPU
++# kernel (verify_kernel.py) is unaffected.
++#
++# ABI versioning: if the installed kernel's ABI version does not match
++# _EXPECTED_ASM_ABI, fall back silently rather than risking wrong results
++# from a stale or incompatible binary.
++# ---------------------------------------------------------------------------
++_EXPECTED_ASM_ABI: int = 1
++_ASM_AVAILABLE: bool = False
++_asm_residual_dist = None
++
++try:
++    import flashspec_asm_kernel as _asm_kernel  # type: ignore[import]
++
++    _abi = _asm_kernel.abi_version()
++    if _abi != _EXPECTED_ASM_ABI:
++        import warnings
++        warnings.warn(
++            f"flashspec-asm-kernel ABI mismatch: expected {_EXPECTED_ASM_ABI}, "
++            f"got {_abi}. Falling back to pure-Python residual distribution.",
++            RuntimeWarning,
++            stacklevel=2,
++        )
++    elif _asm_kernel.cpu_supports_avx2():
++        _ASM_AVAILABLE = True
++        _asm_residual_dist = _asm_kernel.residual_dist
++except ImportError:
++    pass  # flashspec-asm-kernel not installed; pure-Python path used
++
+ 
+ logger = get_logger(__name__)
+ 
+@@ -148,17 +181,44 @@ def _sample_residual(
+     p = target_probs.exp()  # (B, γ, V)
+     q = draft_probs.exp()   # (B, γ, V)
+ 
+-    # Gather the slice at first_rejection (clamped to valid range).
++    # Gather the (V,) slice at first_rejection for each batch element.
+     safe_pos = first_rejection.long().clamp(max=gamma - 1)                   # (B,)
+     idx = safe_pos[:, None, None].expand(batch_size, 1, vocab_size)           # (B, 1, V)
+     p_at_rej = p.gather(1, idx).squeeze(1)                                    # (B, V)
+     q_at_rej = q.gather(1, idx).squeeze(1)                                    # (B, V)
+ 
+-    # Residual distribution: clamp(p - q, min=0) / sum(...) — Algorithm 1 exact.
+-    residual = torch.clamp(p_at_rej - q_at_rej, min=0.0)
+-    denom = residual.sum(dim=-1, keepdim=True).clamp(min=_MIN_PROB)
+-    residual = residual / denom                                                # (B, V)
++    # Residual distribution: max(0, p-q) / sum(max(0, p-q))  — Algorithm 1 exact.
++    #
++    # Route through the ASM kernel when available (CPU path, AVX2, no GPU tensors).
++    # The kernel implements the identical numerical operation; it is tested against
++    # this pure-Python reference at ATOL=1e-5.  See flashspec-asm for the test suite,
++    # benchmark results, and the NaN handling contract (ADR 0001).
++    if (
++        _ASM_AVAILABLE
++        and p_at_rej.device.type == "cpu"
++        and p_at_rej.is_contiguous()
++    ):
++        residual = torch.empty_like(p_at_rej)
++        for b in range(batch_size):
++            _asm_residual_dist(
++                p_at_rej[b].numpy(),
++                q_at_rej[b].numpy(),
++                residual[b].numpy(),
++            )
++    else:
++        # Pure-Python path: GPU tensors, no AVX2, or kernel not installed.
++        residual = torch.clamp(p_at_rej - q_at_rej, min=0.0)
++        denom = residual.sum(dim=-1, keepdim=True).clamp(min=_MIN_PROB)
++        residual = residual / denom                                            # (B, V)
+ 
+-    # Sample from the residual distribution.
+-    residual_token_ids = torch.multinomial(residual, num_samples=1).squeeze(-1)  # (B,)
++    # Sample from the residual distribution (always on torch, unchanged).
++    residual_token_ids = torch.multinomial(residual, num_samples=1).squeeze(-1)
+     return residual_token_ids

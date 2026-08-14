@@ -1,0 +1,17 @@
+# -----------------------------------------------------------------------
+# Add this to flashspec's pyproject.toml [project.optional-dependencies]
+# -----------------------------------------------------------------------
+#
+# [project.optional-dependencies]
+# asm = ["flashspec-asm-kernel>=0.1.0,<2.0.0"]
+#
+# Usage:
+#   pip install flashspec          # pure-Python + Triton GPU path (unchanged)
+#   pip install flashspec[asm]     # + AVX2 CPU residual kernel
+#
+# The upper bound (<2.0.0) guards against future major ABI bumps.
+# _EXPECTED_ASM_ABI in sampling/rejection.py provides the runtime check.
+# -----------------------------------------------------------------------
+#
+# Also add to [project.urls] once the repo is public:
+# "ASM Kernel" = "https://github.com/Mattral/flashspec-asm"
