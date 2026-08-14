@@ -33,6 +33,8 @@ build/%.o: src/%.c $(HEADER) | build/
 
 $(LIB): $(OBJ_ASM) $(OBJ_C)
 	$(CC) -shared -o $@ $^
+	# Also copy into bindings/python/ for wheel packaging
+	cp $(LIB) bindings/python/$(LIB)
 
 test:
 	python3 -m pytest tests/ -v --tb=short
