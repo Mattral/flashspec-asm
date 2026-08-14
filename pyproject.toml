@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "flashspec-asm-kernel"
+version = "0.1.0"
+description = "AVX2 assembly kernel for the residual distribution in speculative decoding (optional backend for flashspec)"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Min Htet Myet (Mattral)" }]
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.24"]
+
+keywords = ["speculative-decoding", "avx2", "assembly", "performance", "llm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Assembly",
+    "Programming Language :: C",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/Mattral/flashspec-asm"
+Repository = "https://github.com/Mattral/flashspec-asm"
+
+[project.optional-dependencies]
+dev = ["pytest", "hypothesis", "torch"]
+
+[tool.setuptools]
+package-dir = {"" = "bindings"}
+packages = ["python"]
+
+[tool.setuptools.package-data]
+"python" = ["*.so", "*.pyd"]
+
+# ---------------------------------------------------------------------------
+# cibuildwheel configuration
+# ---------------------------------------------------------------------------
+[tool.cibuildwheel]
+# Linux x86-64 only for v1 (matches SysV AMD64 ABI target)
+build = "cp39-manylinux_x86_64 cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64"
+skip = "*-musllinux*"
+
+# Install NASM inside the manylinux container before building
+before-all = "yum install -y nasm || apt-get install -y nasm"
+
+# Build the .so inside the wheel
+before-build = "make clean && make"
+
+# Run the correctness suite inside the wheel environment after building
+test-requires = ["pytest", "hypothesis", "numpy", "torch"]
+test-command = "pytest {project}/tests/test_correctness.py -q"
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64"]
+manylinux-x86_64-image = "manylinux2014"
