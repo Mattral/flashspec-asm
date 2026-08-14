@@ -61,7 +61,7 @@ ADR to be written once integration PR is opened against flashspec.
 | 4 | C shim + Python bindings (`ctypes`/`cffi`) | ✅ Done — dispatch wired, ABI version check |
 | 5 | Cycle-level benchmark (C vs ASM) | ✅ Done — 4.85× over C at V=32k; see `bench/results/phase5_*.txt` |
 | 6 | ADRs, README, writeup | ✅ Done — 4 ADRs, writeup ready for publication |
-| 7 | Integration PR into `flashspec` as optional dep | ⬜ Post-v1 |
+| 7 | Integration PR into `flashspec` as optional dep | 🔄 In progress — patch + ADR ready |
 | 8 | Stretch: CPUID dispatch for AVX-512 or ARM NEON | ⬜ Post-v1 |
 
 ## Phase 0 finding
@@ -96,3 +96,60 @@ See `bench/results/phase0_*.txt` for raw numbers.
 - No Windows calling convention support in v1
 - AVX2 baseline only; CPUID scalar fallback for safety
 - AVX-512 and ARM NEON are stretch goals gated behind full v1 release
+
+---
+
+## Phase 7: Integration artifacts
+
+The following files document and implement the flashspec integration:
+
+- [`docs/adr/0005-flashspec-integration.md`](docs/adr/0005-flashspec-integration.md) — decision record
+- [`docs/integration/flashspec-sampling-rejection.patch`](docs/integration/flashspec-sampling-rejection.patch) — exact patch for `flashspec/sampling/rejection.py`
+- [`docs/integration/pyproject-snippet.toml`](docs/integration/pyproject-snippet.toml) — `pyproject.toml` addition for `flashspec[asm]`
+
+### Applying the integration PR
+
+```bash
+# In the flashspec repo:
+git checkout -b feat/asm-kernel-integration
+patch -p1 < /path/to/flashspec-asm/docs/integration/flashspec-sampling-rejection.patch
+# Add optional dep to pyproject.toml (see pyproject-snippet.toml)
+# Run flashspec test suite
+pytest tests/ -v
+```
+
+### Integration test to add to flashspec
+
+```python
+# tests/test_asm_integration.py
+import pytest
+
+def test_asm_backend_available_when_installed():
+    """flashspec detects the ASM kernel when flashspec-asm-kernel is installed."""
+    from flashspec.sampling import rejection
+    # Will be True on AVX2 Linux with flashspec-asm-kernel installed
+    assert hasattr(rejection, '_ASM_AVAILABLE')
+
+def test_rejection_sample_asm_matches_python(monkeypatch):
+    """ASM and pure-Python paths produce statistically identical results."""
+    import torch
+    import flashspec.sampling.rejection as rej
+
+    torch.manual_seed(42)
+    B, gamma, V = 2, 4, 1000
+    dlp = torch.log_softmax(torch.randn(B, gamma, V), dim=-1)
+    tlp = torch.log_softmax(torch.randn(B, gamma, V), dim=-1)
+    ids = dlp.argmax(dim=-1)
+
+    # Run with pure-Python path
+    monkeypatch.setattr(rej, '_ASM_AVAILABLE', False)
+    torch.manual_seed(42)
+    result_py, _, _ = rej.rejection_sample(torch.zeros(B, 1), dlp, tlp, ids, gamma)
+
+    # Run with ASM path (if available)
+    if rej._ASM_AVAILABLE:
+        monkeypatch.setattr(rej, '_ASM_AVAILABLE', True)
+        torch.manual_seed(42)
+        result_asm, _, _ = rej.rejection_sample(torch.zeros(B, 1), dlp, tlp, ids, gamma)
+        assert torch.allclose(result_py.float(), result_asm.float())
+```
