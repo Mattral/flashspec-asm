@@ -90,3 +90,29 @@ jobs:
         with:
           name: benchmark-results
           path: bench/results/
+
+  wheel:
+    name: Build and test wheel (cibuildwheel)
+    runs-on: ubuntu-latest
+    # Only run on pushes to main (not PRs) to avoid burning CI minutes
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cibuildwheel
+        run: pip install cibuildwheel==2.22.0
+
+      - name: Build wheels
+        run: python -m cibuildwheel --output-dir wheelhouse
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels
+          path: wheelhouse/*.whl
