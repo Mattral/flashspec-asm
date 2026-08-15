@@ -92,7 +92,7 @@ jobs:
           path: bench/results/
 
   wheel:
-    name: Build and test wheel (cibuildwheel)
+    name: Build platform wheel (Linux x86_64)
     runs-on: ubuntu-latest
     # Only run on pushes to main (not PRs) to avoid burning CI minutes
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -105,14 +105,35 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install cibuildwheel
-        run: pip install cibuildwheel==2.22.0
+      - name: Install NASM and build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y nasm
 
-      - name: Build wheels
-        run: python -m cibuildwheel --output-dir wheelhouse
+      - name: Install Python build dependencies
+        run: pip install build wheel auditwheel
 
-      - name: Upload wheels
+      - name: Build .so and wheel
+        run: python build_wheel.py
+
+      - name: Audit wheel (check manylinux compatibility)
+        run: |
+          pip install auditwheel
+          auditwheel show dist/*.whl
+
+      - name: Install and smoke-test wheel
+        run: |
+          pip install dist/*.whl
+          python -c "
+          import flashspec_asm_kernel as asm
+          print('ABI version:', asm.abi_version())
+          print('AVX2 supported:', asm.cpu_supports_avx2())
+          assert asm.abi_version() == 1
+          print('Smoke test: PASSED')
+          "
+
+      - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wheels
-          path: wheelhouse/*.whl
+          name: flashspec-asm-kernel-wheel
+          path: dist/*.whl
