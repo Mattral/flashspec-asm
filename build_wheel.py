@@ -15,6 +15,10 @@ Run from repo root:
 import os, sys, shutil, subprocess, sysconfig, platform
 from pathlib import Path
 
+# Dependencies (setuptools, build, wheel) must be installed by the caller.
+# CI installs them explicitly before running this script.
+# Locally: pip install setuptools build wheel
+
 ROOT = Path(__file__).parent
 PKG  = ROOT / "flashspec_asm_kernel"
 DIST = ROOT / "dist"
