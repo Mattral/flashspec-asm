@@ -1,13 +1,13 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "flashspec-asm-kernel"
 version = "0.1.0"
 description = "AVX2 assembly kernel for the residual distribution in speculative decoding (optional backend for flashspec)"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "Apache-2.0"
 authors = [{ name = "Min Htet Myet (Mattral)" }]
 requires-python = ">=3.9"
 dependencies = ["numpy>=1.24"]
@@ -17,7 +17,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Assembly",
     "Programming Language :: C",
