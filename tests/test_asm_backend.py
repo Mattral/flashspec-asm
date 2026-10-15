@@ -113,9 +113,80 @@ def test_dispatch_matches_c_baseline(V):
     )
 
 
-def test_out_buffer_is_written_in_place():
-    p, q = _pmfs(1000, seed=4)
-    out = np.full(1000, np.nan, dtype=np.float32)
-    ret = asm.residual_dist(p, q, out)
-    assert ret is out
+# ---------------------------------------------------------------------------
+# Argument validation (0.1.2). The C side takes raw pointers plus V = len(p),
+# so each of these used to be an out-of-bounds access or a silently ignored
+# output buffer.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("impl", IMPLS)
+@pytest.mark.parametrize("Vq", [0, 1, 63, 65])
+def test_length_mismatch_raises(impl, Vq):
+    """A shorter q was read past its end; a longer one was silently cut."""
+    p, _ = _pmfs(64, seed=5)
+    q = np.full(Vq, 1.0 / max(Vq, 1), dtype=np.float32)
+    with pytest.raises(ValueError, match="same length"):
+        impl(p, q)
+
+
+@pytest.mark.parametrize("impl", IMPLS)
+def test_dtype_mismatch_raises(impl):
+    p, q = _pmfs(64, seed=6)
+    with pytest.raises(ValueError, match="same dtype"):
+        impl(p, q.astype(np.float64))
+    with pytest.raises(ValueError, match="same dtype"):
+        impl(p.astype(np.float16), q)
+
+
+@pytest.mark.parametrize("impl", IMPLS)
+def test_matching_non_float32_inputs_still_accepted(impl):
+    """p and q are only read, so matching float64 inputs are converted."""
+    p, q = _pmfs(100, seed=7)
+    out = impl(p.astype(np.float64), q.astype(np.float64))
+    assert out.dtype == np.float32
+    np.testing.assert_allclose(out, _reference(p, q), atol=ATOL, rtol=RTOL)
+
+
+@pytest.mark.parametrize("impl", IMPLS)
+def test_non_1d_raises(impl):
+    p, q = _pmfs(64, seed=8)
+    with pytest.raises(ValueError, match="1-D"):
+        impl(p.reshape(8, 8), q.reshape(8, 8))
+    with pytest.raises(ValueError, match="1-D"):
+        impl(np.float32(0.5), np.float32(0.5))
+
+
+def _bad_outs(V: int):
+    base = np.zeros(2 * V, dtype=np.float32)
+    readonly = np.zeros(V, dtype=np.float32)
+    readonly.flags.writeable = False
+    return [
+        pytest.param(np.zeros(V, dtype=np.float64), "dtype float32", id="float64"),
+        pytest.param(np.zeros(V, dtype=np.float16), "dtype float32", id="float16"),
+        pytest.param(np.zeros(V, dtype=">f4"), "dtype float32", id="big-endian-f4"),
+        pytest.param(base[::2], "C-contiguous", id="strided"),
+        pytest.param(np.zeros(V - 1, dtype=np.float32), r"shape \(64,\)", id="too-short"),
+        pytest.param(np.zeros(V + 1, dtype=np.float32), r"shape \(64,\)", id="too-long"),
+        pytest.param(np.zeros((1, V), dtype=np.float32), r"shape \(64,\)", id="2-D"),
+        pytest.param(readonly, "writeable", id="read-only"),
+        pytest.param([0.0] * V, "numpy.ndarray", id="list"),
+    ]
+
+
+@pytest.mark.parametrize("impl", IMPLS)
+@pytest.mark.parametrize("out,match", _bad_outs(64))
+def test_bad_out_buffer_raises_and_is_untouched(impl, out, match):
+    """Never write the result to a hidden copy (or past the buffer's end)."""
+    p, q = _pmfs(64, seed=9)
+    before = np.array(out, copy=True)
+    with pytest.raises(ValueError, match=match):
+        impl(p, q, out)
+    np.testing.assert_array_equal(np.asarray(out), before)
+
+
+@pytest.mark.parametrize("impl", IMPLS)
+def test_valid_out_buffer_written_in_place(impl):
+    p, q = _pmfs(257, seed=10)
+    out = np.full(257, np.nan, dtype=np.float32)
+    assert impl(p, q, out) is out
     np.testing.assert_allclose(out, _reference(p, q), atol=ATOL, rtol=RTOL)
