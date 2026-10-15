@@ -155,7 +155,7 @@ benchmarking the strongest compiler baseline and must never be shipped.
 ### Release wheel
 
 ```bash
-scripts/build_wheel.sh   # needs docker → wheelhouse/*-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+scripts/build_wheel.sh   # needs docker → wheelhouse/*-py3-none-manylinux*.whl (manylinux2014 / manylinux_2_17)
 python scripts/check_fallback_isa.py wheelhouse/*.whl   # no AVX outside the kernel
 python -m venv /tmp/v && /tmp/v/bin/pip install wheelhouse/*.whl
 (cd /tmp && /tmp/v/bin/python -I "$OLDPWD/scripts/smoke_test_wheel.py")

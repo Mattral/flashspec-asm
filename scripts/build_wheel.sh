@@ -5,7 +5,8 @@
 # Usage (from anywhere, needs docker):
 #     scripts/build_wheel.sh
 # Output:
-#     wheelhouse/flashspec_asm_kernel-<ver>-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+#     wheelhouse/flashspec_asm_kernel-<ver>-py3-none-<tags>.whl, tagged
+#     manylinux_2_17_x86_64 + manylinux2014_x86_64 (order varies by auditwheel)
 #
 # Environment:
 #     MANYLINUX_IMAGE  container image (default: quay.io/pypa/manylinux2014_x86_64)

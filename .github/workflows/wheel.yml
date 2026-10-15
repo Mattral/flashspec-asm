@@ -31,10 +31,17 @@ jobs:
           pip install auditwheel
           whls=(wheelhouse/*.whl)
           test "${#whls[@]}" -eq 1
-          case "${whls[0]}" in
-            *-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl) ;;
-            *) echo "unexpected wheel tag: ${whls[0]}"; exit 1 ;;
-          esac
+          # Expect py3-none + exactly {manylinux_2_17, manylinux2014}; the
+          # order of the platform tags in the name varies by auditwheel version.
+          python - "${whls[0]}" <<'EOF'
+          import sys
+          from pathlib import Path
+          *_, py, abi, plat = Path(sys.argv[1]).stem.split("-")
+          want = {"manylinux_2_17_x86_64", "manylinux2014_x86_64"}
+          got = set(plat.split("."))
+          print(f"tags: {py}-{abi}-{sorted(got)}")
+          sys.exit(0 if (py, abi, got) == ("py3", "none", want) else "unexpected wheel tag")
+          EOF
           auditwheel show "${whls[0]}"
 
       - name: No AVX in the non-AVX2 code paths of the shipped .so
