@@ -1,0 +1,112 @@
+# Build the release wheel in a manylinux2014 container, check it, and test
+# the installed wheel from outside the source tree.
+#
+# Reusable: called by ci.yml (every PR and push to main) and by release.yml
+# (manual), so the exact wheel that would be published is the one that was
+# built and tested here. A publish step must `needs:` this workflow.
+name: Wheel
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    name: Build manylinux2014 wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Runs make + pip wheel + auditwheel repair inside
+      # quay.io/pypa/manylinux2014_x86_64 (glibc 2.17).
+      - name: Build and repair wheel (manylinux container)
+        run: scripts/build_wheel.sh
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: auditwheel show
+        run: |
+          pip install auditwheel
+          whls=(wheelhouse/*.whl)
+          test "${#whls[@]}" -eq 1
+          case "${whls[0]}" in
+            *-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl) ;;
+            *) echo "unexpected wheel tag: ${whls[0]}"; exit 1 ;;
+          esac
+          auditwheel show "${whls[0]}"
+
+      - name: No AVX in the non-AVX2 code paths of the shipped .so
+        run: python scripts/check_fallback_isa.py wheelhouse/*.whl
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: flashspec-asm-kernel-wheel
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  test:
+    name: Clean-venv install test (Python ${{ matrix.python }})
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: flashspec-asm-kernel-wheel
+          path: ${{ runner.temp }}/wheelhouse
+
+      # Fresh venv, wheel only, run from a temp dir so the checkout cannot be
+      # imported. The smoke test fails unless the package and the .so come
+      # from site-packages, the CPU has AVX2 (ASM kernel dispatched), and the
+      # results match NumPy.
+      - name: Install wheel into a clean venv and test it
+        working-directory: ${{ runner.temp }}
+        env:
+          FLASHSPEC_ASM_REQUIRE_LIB: "1"
+        run: |
+          python -m venv venv
+          venv/bin/python -m pip install --only-binary :all: wheelhouse/*.whl pytest
+          venv/bin/python -I "$GITHUB_WORKSPACE/scripts/smoke_test_wheel.py"
+          cp "$GITHUB_WORKSPACE/tests/test_asm_backend.py" .
+          venv/bin/python -I -m pytest -v -p no:cacheprovider test_asm_backend.py
+
+  test-glibc217:
+    name: Install test on glibc 2.17 (manylinux2014 image, oldest Python)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: flashspec-asm-kernel-wheel
+          path: wheelhouse
+
+      # The oldest glibc the manylinux2014 tag promises, with the oldest
+      # supported Python the image still carries (3.9 while it has it).
+      - name: Smoke test in quay.io/pypa/manylinux2014_x86_64
+        run: |
+          docker run --rm \
+            -v "$PWD/wheelhouse":/wh:ro -v "$PWD/scripts":/scripts:ro \
+            quay.io/pypa/manylinux2014_x86_64 bash -euxc '
+              ldd --version | sed -n 1p
+              py=$(ls -d /opt/python/cp39-cp39 /opt/python/cp310-cp310 /opt/python/cp311-cp311 2>/dev/null | sed -n 1p)
+              "$py/bin/python" -m venv /tmp/venv
+              /tmp/venv/bin/python -m pip install --only-binary :all: /wh/*.whl
+              cd /tmp && /tmp/venv/bin/python -I /scripts/smoke_test_wheel.py
+            '

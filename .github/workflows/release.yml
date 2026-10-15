@@ -1,0 +1,53 @@
+# Release skeleton. NOT ENABLED.
+#
+# Manual-only (workflow_dispatch). It rebuilds and re-tests the wheel via
+# wheel.yml, and the publish job `needs` that, so nothing can be uploaded
+# unless the clean-venv install tests pass on the exact files to upload.
+#
+# The publish job is hard-disabled (`if: false`). To enable it:
+#   1. On PyPI, add a trusted publisher for this repo, workflow `release.yml`,
+#      environment `pypi` (and the same on TestPyPI for `testpypi`).
+#   2. In GitHub repo settings, create those environments, ideally with a
+#      required reviewer.
+#   3. Remove the `if: false` line below.
+# Only the wheel is uploaded. An sdist (python -m build --sdist) also works
+# now, since setup.py runs `make` for source builds, but whether to publish
+# one is a separate decision.
+name: Release (manual, not enabled)
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Upload target"
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    uses: ./.github/workflows/wheel.yml
+
+  publish:
+    name: Publish to ${{ inputs.repository }}
+    needs: wheel
+    if: false  # NOT ENABLED - see the header of this file
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.repository }}
+    permissions:
+      id-token: write  # PyPI trusted publishing (OIDC), no API token stored
+    steps:
+      - name: Download tested wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: flashspec-asm-kernel-wheel
+          path: dist
+
+      - name: Upload
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          repository-url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}

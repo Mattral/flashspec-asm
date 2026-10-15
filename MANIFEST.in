@@ -1,0 +1,7 @@
+# What a source build needs to compile libflashspec_asm.so (see setup.py).
+include Makefile
+include include/flashspec_asm.h
+include src/kernel_avx2.asm src/shim.c src/cpuid.c
+include CHANGELOG.md LICENSE README.md
+# Never ship a prebuilt library in the sdist: it may be a -march=native build.
+global-exclude *.so *.o
