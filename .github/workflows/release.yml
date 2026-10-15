@@ -1,19 +1,18 @@
-# Release skeleton. NOT ENABLED.
+# Release workflow: manual-only (workflow_dispatch).
 #
-# Manual-only (workflow_dispatch). It rebuilds and re-tests the wheel via
-# wheel.yml, and the publish job `needs` that, so nothing can be uploaded
-# unless the clean-venv install tests pass on the exact files to upload.
+# It rebuilds and re-tests the wheel via wheel.yml, and the publish job
+# `needs` that, so nothing can be uploaded unless the clean-venv install
+# tests pass on the exact files being uploaded.
 #
-# The publish job is hard-disabled (`if: false`). To enable it:
-#   1. On PyPI, add a trusted publisher for this repo, workflow `release.yml`,
-#      environment `pypi` (and the same on TestPyPI for `testpypi`).
-#   2. In GitHub repo settings, create those environments, ideally with a
-#      required reviewer.
-#   3. Remove the `if: false` line below.
-# Only the wheel is uploaded. An sdist (python -m build --sdist) also works
-# now, since setup.py runs `make` for source builds, but whether to publish
-# one is a separate decision.
-name: Release (manual, not enabled)
+# Uploads use PyPI trusted publishing (OIDC); no API token is stored. The
+# PyPI project trusts this repo, workflow `release.yml`, environment `pypi`.
+# The `testpypi` target additionally needs the same trusted publisher on
+# test.pypi.org. Tip: add a required reviewer to the `pypi` environment in
+# the repo settings so every upload needs a click.
+#
+# Only the wheel is uploaded. An sdist (python -m build --sdist) also works,
+# since setup.py runs `make` for source builds, but is not published.
+name: Release
 
 on:
   workflow_dispatch:
@@ -22,7 +21,7 @@ on:
         description: "Upload target"
         type: choice
         options: [testpypi, pypi]
-        default: testpypi
+        default: pypi
 
 permissions:
   contents: read
@@ -34,7 +33,6 @@ jobs:
   publish:
     name: Publish to ${{ inputs.repository }}
     needs: wheel
-    if: false  # NOT ENABLED - see the header of this file
     runs-on: ubuntu-latest
     environment: ${{ inputs.repository }}
     permissions:
