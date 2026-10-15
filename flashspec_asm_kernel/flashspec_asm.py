@@ -3,12 +3,15 @@
 Wraps libflashspec_asm.so via ctypes. Provides a drop-in replacement for
 the pure-NumPy residual distribution used in flashspec's CPU fallback path.
 
-Usage (after Phase 4 ships):
-    from flashspec_asm import residual_dist, cpu_supports_avx2, abi_version
+Usage:
+    from flashspec_asm_kernel import residual_dist, cpu_supports_avx2, abi_version
 
-Integration into flashspec:
+The shared library is loaded when this module is imported. If it is missing
+or cannot be loaded, the import raises ImportError, so callers only need
+``except ImportError`` to fall back:
+
     try:
-        import flashspec_asm as _asm
+        import flashspec_asm_kernel as _asm
         _ASM_AVAILABLE = _asm.cpu_supports_avx2()
         if _asm.abi_version() != _EXPECTED_ABI:
             import warnings
@@ -19,18 +22,14 @@ Integration into flashspec:
             _ASM_AVAILABLE = False
     except ImportError:
         _ASM_AVAILABLE = False
-
-Status: Phase 4 stub. Functions raise NotImplementedError until the shared
-object is built and the ctypes bindings are wired up.
 """
 
 from __future__ import annotations
 
 import ctypes
 import ctypes.util
-import os
 import pathlib
-from typing import Optional
+from typing import Iterator, Optional
 
 import numpy as np
 
@@ -40,46 +39,56 @@ import numpy as np
 # ---------------------------------------------------------------------------
 _EXPECTED_ABI_VERSION = 1
 
+_LIB_NAME = "libflashspec_asm.so"
+
 # ---------------------------------------------------------------------------
 # Library loading
 # ---------------------------------------------------------------------------
 
-def _find_library() -> Optional[pathlib.Path]:
-    """Search for libflashspec_asm.so in standard locations."""
-    candidates = [
-        # Installed alongside this Python file (wheel layout)
-        pathlib.Path(__file__).parent / "libflashspec_asm.so",
-        # Repo root (development build via `make`)
-        pathlib.Path(__file__).parent.parent / "libflashspec_asm.so",
-        # Legacy bindings/python location
-        pathlib.Path(__file__).parent.parent / "bindings" / "python" / "libflashspec_asm.so",
-        # System library path
-        pathlib.Path(ctypes.util.find_library("flashspec_asm") or ""),
-    ]
-    for path in candidates:
-        if path.exists():
-            return path
-    return None
+def _candidates() -> Iterator[str]:
+    """Library locations to try, in order.
+
+    1. Next to this file: the wheel layout, and where `make` copies the
+       library in a source checkout.
+    2. The dynamic linker's search path, by name (only consulted if 1 is
+       missing or fails to load, since find_library spawns subprocesses).
+       find_library returns a soname such as "libflashspec_asm.so", not a
+       path, so it is handed to dlopen as is, and None (nothing found) is
+       skipped. 0.1.0 wrapped it in Path(... or ""), i.e. Path("."), which
+       always "exists", so a missing library was "found" as ".".
+    """
+    local = pathlib.Path(__file__).resolve().parent / _LIB_NAME
+    if local.is_file():
+        yield str(local)
+    system = ctypes.util.find_library("flashspec_asm")
+    if system:
+        yield system
 
 
-_lib: Optional[ctypes.CDLL] = None
-
-
-def _load() -> ctypes.CDLL:
-    global _lib
-    if _lib is not None:
-        return _lib
-
-    path = _find_library()
-    if path is None:
+def _load() -> tuple[ctypes.CDLL, str]:
+    errors = []
+    for path in _candidates():
+        try:
+            lib = ctypes.CDLL(path)
+        except OSError as exc:
+            errors.append(f"{path}: {exc}")
+            continue
+        try:
+            _setup_signatures(lib)
+        except AttributeError as exc:
+            # A library by that name, but not ours (or a stale build).
+            errors.append(f"{path}: missing symbol: {exc}")
+            continue
+        return lib, path
+    if not errors:
         raise ImportError(
-            "libflashspec_asm.so not found. "
-            "Build it with `make` from the repo root, or install the wheel."
+            f"{_LIB_NAME} not found next to {__file__} or on the dynamic "
+            "linker path. Install a binary wheel of flashspec-asm-kernel, "
+            "or build it with `make` from a source checkout."
         )
-
-    _lib = ctypes.CDLL(str(path))
-    _setup_signatures(_lib)
-    return _lib
+    raise ImportError(
+        f"{_LIB_NAME} could not be loaded:\n  " + "\n  ".join(errors)
+    )
 
 
 def _setup_signatures(lib: ctypes.CDLL) -> None:
@@ -110,23 +119,28 @@ def _setup_signatures(lib: ctypes.CDLL) -> None:
     lib.residual_dist_c.argtypes = lib.residual_dist.argtypes
 
 
+# Load eagerly: a missing or broken library must fail the import (ImportError)
+# rather than the first call (OSError), so `except ImportError` fallbacks work.
+_lib, _LIB_PATH = _load()
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 def abi_version() -> int:
     """Return the ABI version compiled into the shared object."""
-    return int(_load().abi_version())
+    return int(_lib.abi_version())
 
 
 def cpu_supports_avx2() -> bool:
     """Return True if the runtime CPU supports AVX2."""
-    return bool(_load().cpu_supports_avx2())
+    return bool(_lib.cpu_supports_avx2())
 
 
 def cpu_supports_avx512f() -> bool:
     """Return True if the runtime CPU supports AVX-512F (stretch goal)."""
-    return bool(_load().cpu_supports_avx512f())
+    return bool(_lib.cpu_supports_avx512f())
 
 
 def residual_dist(
@@ -161,8 +175,7 @@ def residual_dist(
     else:
         out = np.ascontiguousarray(out, dtype=np.float32)
 
-    lib = _load()
-    lib.residual_dist(
+    _lib.residual_dist(
         p.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
         q.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
         out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
@@ -187,8 +200,7 @@ def residual_dist_c_baseline(
     if out is None:
         out = np.empty(V, dtype=np.float32)
 
-    lib = _load()
-    lib.residual_dist_c(
+    _lib.residual_dist_c(
         p.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
         q.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
         out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
