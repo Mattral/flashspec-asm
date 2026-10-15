@@ -6,8 +6,12 @@
 # rebuilt), with its sha256 in the notes.
 #
 # Runs on a pushed v* tag (for tags whose commit already contains this file)
-# or manually for an existing tag (e.g. tags created before this file).
-# Re-running for the same tag updates the notes and replaces the asset.
+# or manually. A manual run takes an existing tag, or a new tag plus the
+# commit to tag. The commit must be on main and its pyproject.toml must carry
+# that version. The workflow then creates an annotated tag (message: the
+# CHANGELOG section) before the release. Tags pushed with the workflow's own
+# token do not re-trigger it. Re-running for the same tag updates the notes
+# and replaces the asset.
 name: GitHub Release
 
 on:
@@ -16,8 +20,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to release, e.g. v0.1.2"
+        description: "Tag to release, e.g. v0.1.2"
         required: true
+        type: string
+      commit:
+        description: "Commit to tag if the tag does not exist yet (full SHA, on main)"
+        required: false
         type: string
 
 permissions:
@@ -28,11 +36,26 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
+      COMMIT: ${{ inputs.commit }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0  # all of main and all tags
+
+      - name: Resolve the tag (or the commit to tag)
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            git checkout -q "refs/tags/$TAG"
+            echo "NEW_TAG=" >> "$GITHUB_ENV"
+          else
+            test -n "$COMMIT" || { echo "tag $TAG does not exist; pass commit"; exit 1; }
+            git merge-base --is-ancestor "$COMMIT" origin/main \
+              || { echo "$COMMIT is not on main"; exit 1; }
+            git checkout -q "$COMMIT"
+            echo "NEW_TAG=1" >> "$GITHUB_ENV"
+          fi
+          git log -1 --format='releasing %H %s'
 
       - name: Check tag, pyproject and CHANGELOG agree
         run: |
@@ -58,7 +81,10 @@ jobs:
               "· Linux x86-64, Python >= 3.9, glibc >= 2.17 "
               "(`py3-none-manylinux2014_x86_64` wheel).\n\n"
           )
-          open("notes.md", "w", encoding="utf-8").write(header + m.group(1).strip() + "\n")
+          body = m.group(1).strip() + "\n"
+          open("notes.md", "w", encoding="utf-8").write(header + body)
+          open("tagmsg.txt", "w", encoding="utf-8").write(
+              f"flashspec-asm-kernel {version}\n\n{body}")
           EOF
 
       - name: Fetch the wheel PyPI serves for this version
@@ -76,6 +102,14 @@ jobs:
             echo '```'
           } >> notes.md
           cat notes.md
+
+      - name: Create the annotated tag
+        if: env.NEW_TAG == '1'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$COMMIT" -F tagmsg.txt
+          git push origin "refs/tags/$TAG"
 
       - name: Create or update the release
         run: |
