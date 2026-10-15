@@ -1,0 +1,88 @@
+# Create the GitHub Release for a version tag (vX.Y.Z) after that version is
+# on PyPI.
+#
+# Notes: an install line plus the version's section of CHANGELOG.md.
+# Asset: the exact wheel PyPI serves for that version (downloaded, not
+# rebuilt), with its sha256 in the notes.
+#
+# Runs on a pushed v* tag (for tags whose commit already contains this file)
+# or manually for an existing tag (e.g. tags created before this file).
+# Re-running for the same tag updates the notes and replaces the asset.
+name: GitHub Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, e.g. v0.1.2"
+        required: true
+        type: string
+
+permissions:
+  contents: write  # create/edit the release and upload the asset
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+
+      - name: Check tag, pyproject and CHANGELOG agree
+        run: |
+          case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "not a vX.Y.Z tag: $TAG"; exit 1 ;; esac
+          VERSION="${TAG#v}"
+          grep -qx "version = \"$VERSION\"" pyproject.toml \
+            || { echo "pyproject.toml version != $VERSION"; exit 1; }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build release notes from CHANGELOG.md
+        run: |
+          python3 - <<'EOF'
+          import os, re, sys
+          version = os.environ["VERSION"]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)",
+                        text, re.S | re.M)
+          if not m:
+              sys.exit(f"no CHANGELOG.md section for {version}")
+          header = (
+              f"```bash\npip install flashspec-asm-kernel=={version}\n```\n\n"
+              f"PyPI: https://pypi.org/project/flashspec-asm-kernel/{version}/ "
+              "· Linux x86-64, Python >= 3.9, glibc >= 2.17 "
+              "(`py3-none-manylinux2014_x86_64` wheel).\n\n"
+          )
+          open("notes.md", "w", encoding="utf-8").write(header + m.group(1).strip() + "\n")
+          EOF
+
+      - name: Fetch the wheel PyPI serves for this version
+        run: |
+          python3 -m pip download --no-deps --only-binary :all: \
+            --python-version 3.12 --platform manylinux2014_x86_64 \
+            -d dist "flashspec-asm-kernel==$VERSION"
+          ls -l dist
+          test "$(find dist -name '*.whl' | wc -l)" -eq 1
+          {
+            echo
+            echo "**Wheel sha256** (identical to the file on PyPI):"
+            echo '```'
+            (cd dist && sha256sum ./*.whl | sed 's# \./# #')
+            echo '```'
+          } >> notes.md
+          cat notes.md
+
+      - name: Create or update the release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file notes.md
+            gh release upload "$TAG" dist/*.whl --clobber
+          else
+            gh release create "$TAG" dist/*.whl --verify-tag \
+              --title "$TAG" --notes-file notes.md
+          fi
