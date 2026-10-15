@@ -4,6 +4,36 @@ All notable changes to `flashspec-asm-kernel` are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-10-15
+
+Argument validation in the Python bindings. The C ABI
+(`FLASHSPEC_ASM_ABI_VERSION = 1`), the library and the kernel are
+unchanged; only `flashspec_asm_kernel/flashspec_asm.py` changed.
+
+### Fixed
+- **`out=` is never silently replaced by a copy.** `residual_dist` used to
+  convert a non-float32 or non-contiguous `out` with `np.ascontiguousarray`,
+  so the result went into a temporary copy and the caller's buffer was left
+  untouched. It now raises `ValueError` unless `out` is a writeable,
+  C-contiguous float32 `ndarray` of shape `(V,)`.
+- **Out-of-bounds read and write in `residual_dist_c_baseline`.** It passed
+  `len(p)` as the length without checking `q` or `out`. A shorter `q` was
+  read past its end. A too-short `out` was written past its end, and an `out`
+  of another dtype received raw float32 bit patterns. Both wrappers now share
+  one validation step.
+- `residual_dist` and `residual_dist_c_baseline` raise `ValueError` if `p` and
+  `q` are not 1-D, differ in length, or differ in dtype. Matching non-float32
+  inputs (e.g. both float64) are still accepted and converted, since they are
+  only read.
+
+### Changed
+- Integration docs (`docs/integration/flashspec-sampling-rejection.patch`,
+  ADR 0005, `docs/integration/pyproject-snippet.toml`) now carry the FlashSpec
+  requirements: pin `flashspec-asm-kernel>=0.1.1` with a Linux x86-64
+  environment marker, catch `(ImportError, OSError)`, and route only float32
+  tensors to the kernel. The patch file's hunk headers were also corrected;
+  the previous version was malformed and did not apply.
+
 ## [0.1.1] - 2026-10-15
 
 0.1.0 on PyPI is a source distribution only. Installing it never built the

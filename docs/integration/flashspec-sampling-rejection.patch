@@ -10,7 +10,7 @@
  
  The acceptance criterion and residual distribution are immutable by AGENTS.md §2.1.
  Do NOT alter the residual computation below without a corresponding paper revision.
-@@ -12,6 +14,37 @@ import torch
+@@ -12,6 +14,52 @@ import torch
  from flashspec.utils.logging import get_logger
  
  __all__ = ["rejection_sample"]
@@ -19,8 +19,12 @@
 +# Optional ASM accelerator backend
 +#
 +# flashspec-asm-kernel ships as a separate pip package:
-+#   pip install flashspec[asm]        # installs flashspec-asm-kernel
++#   pip install flashspec[asm]        # installs flashspec-asm-kernel>=0.1.1
 +#   pip install flashspec             # pure-Python path, unchanged
++#
++# The [asm] extra is pinned to >=0.1.1 and limited to Linux x86-64 (see
++# pyproject): 0.1.0 shipped without its shared library, and there is no
++# wheel for other platforms.
 +#
 +# The kernel accelerates residual_dist on the CPU path only. The Triton GPU
 +# kernel (verify_kernel.py) is unaffected.
@@ -48,13 +52,18 @@
 +    elif _asm_kernel.cpu_supports_avx2():
 +        _ASM_AVAILABLE = True
 +        _asm_residual_dist = _asm_kernel.residual_dist
-+except ImportError:
-+    pass  # flashspec-asm-kernel not installed; pure-Python path used
++except (ImportError, OSError):
++    # ImportError: not installed, or (>= 0.1.1) its library is missing or
++    # cannot be loaded. OSError: 0.1.0 imported fine without its library and
++    # only failed on the first call (abi_version() above) with OSError.
++    # Either way, use the pure-Python path.
++    _ASM_AVAILABLE = False
++    _asm_residual_dist = None
 +
  
  logger = get_logger(__name__)
  
-@@ -148,17 +181,44 @@ def _sample_residual(
+@@ -148,17 +196,44 @@ def _sample_residual(
      p = target_probs.exp()  # (B, γ, V)
      q = draft_probs.exp()   # (B, γ, V)
  
@@ -75,9 +84,17 @@
 +    # The kernel implements the identical numerical operation; it is tested against
 +    # this pure-Python reference at ATOL=1e-5.  See flashspec-asm for the test suite,
 +    # benchmark results, and the NaN handling contract (ADR 0001).
++    #
++    # float32 only: the kernel computes in float32 and writes into `residual`
++    # through .numpy(). Any other dtype (float64, bf16, fp16) takes the
++    # pure-Python path. Without this guard, kernel 0.1.1 silently wrote the
++    # result into a float32 copy and left `residual` uninitialised, and
++    # kernel >= 0.1.2 raises ValueError instead.
 +    if (
 +        _ASM_AVAILABLE
 +        and p_at_rej.device.type == "cpu"
++        and p_at_rej.dtype == torch.float32
++        and q_at_rej.dtype == torch.float32
 +        and p_at_rej.is_contiguous()
 +    ):
 +        residual = torch.empty_like(p_at_rej)
@@ -88,7 +105,7 @@
 +                residual[b].numpy(),
 +            )
 +    else:
-+        # Pure-Python path: GPU tensors, no AVX2, or kernel not installed.
++        # Pure-Python path: GPU tensors, non-float32, no AVX2, or kernel not installed.
 +        residual = torch.clamp(p_at_rej - q_at_rej, min=0.0)
 +        denom = residual.sum(dim=-1, keepdim=True).clamp(min=_MIN_PROB)
 +        residual = residual / denom                                            # (B, V)

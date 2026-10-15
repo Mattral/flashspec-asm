@@ -24,7 +24,7 @@ from .flashspec_asm import (  # noqa: F401
     residual_dist_c_baseline,
 )
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __all__ = [
     "abi_version",
     "cpu_supports_avx2",

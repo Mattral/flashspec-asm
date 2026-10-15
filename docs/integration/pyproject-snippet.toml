@@ -3,14 +3,23 @@
 # -----------------------------------------------------------------------
 #
 # [project.optional-dependencies]
-# asm = ["flashspec-asm-kernel>=0.1.0,<2.0.0"]
+# asm = [
+#     'flashspec-asm-kernel>=0.1.1,<2.0.0; sys_platform == "linux" and platform_machine == "x86_64"',
+# ]
 #
 # Usage:
 #   pip install flashspec          # pure-Python + Triton GPU path (unchanged)
-#   pip install flashspec[asm]     # + AVX2 CPU residual kernel
+#   pip install flashspec[asm]     # + AVX2 CPU residual kernel (Linux x86-64)
 #
+# >=0.1.1: 0.1.0 is an sdist without the shared library and cannot work.
+# The environment marker makes the extra a no-op where no wheel exists
+# (macOS, ARM, ...) instead of a failed sdist build.
 # The upper bound (<2.0.0) guards against future major ABI bumps.
 # _EXPECTED_ASM_ABI in sampling/rejection.py provides the runtime check.
+#
+# Pair this with the two runtime guards in rejection.py (see ADR 0005):
+#   except (ImportError, OSError)   around the optional import
+#   dtype == torch.float32          on p and q before calling the kernel
 # -----------------------------------------------------------------------
 #
 # Also add to [project.urls] once the repo is public:

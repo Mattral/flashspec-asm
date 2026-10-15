@@ -143,6 +143,60 @@ def cpu_supports_avx512f() -> bool:
     return bool(_lib.cpu_supports_avx512f())
 
 
+def _prepare(
+    p: np.ndarray,
+    q: np.ndarray,
+    out: Optional[np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Validate arguments and return C-ready (p, q, out, V).
+
+    The C functions take raw pointers and a length, so every mismatch
+    here would otherwise be an out-of-bounds read/write or a silent wrong
+    result. Raises ValueError on:
+      * p or q not 1-D, or of different lengths (a shorter q was read past
+        its end), or of different dtypes;
+      * an ``out`` buffer that is not a writeable, C-contiguous float32
+        ndarray of shape (V,). Converting it would write the result into a
+        temporary copy and leave the caller's buffer untouched; not
+        converting it (as the C-baseline wrapper used to) writes float32
+        bit patterns into a buffer of another dtype, or past its end.
+
+    p and q of any matching float dtype are converted to contiguous float32
+    (they are only read, so a copy is harmless).
+    """
+    p = np.asarray(p)
+    q = np.asarray(q)
+    if p.ndim != 1 or q.ndim != 1:
+        raise ValueError(f"p and q must be 1-D; got shapes {p.shape} and {q.shape}")
+    if p.shape != q.shape:
+        raise ValueError(
+            f"p and q must have the same length; got {p.shape[0]} and {q.shape[0]}"
+        )
+    if p.dtype != q.dtype:
+        raise ValueError(f"p and q must have the same dtype; got {p.dtype} and {q.dtype}")
+    p = np.ascontiguousarray(p, dtype=np.float32)
+    q = np.ascontiguousarray(q, dtype=np.float32)
+
+    V = p.shape[0]
+    if out is None:
+        out = np.empty(V, dtype=np.float32)
+    elif not isinstance(out, np.ndarray):
+        raise ValueError(f"out must be a numpy.ndarray; got {type(out).__name__}")
+    elif out.dtype != np.float32:
+        raise ValueError(f"out must have dtype float32; got {out.dtype}")
+    elif out.shape != (V,):
+        raise ValueError(f"out must have shape ({V},); got {out.shape}")
+    elif not out.flags.c_contiguous:
+        raise ValueError("out must be C-contiguous")
+    elif not out.flags.writeable:
+        raise ValueError("out must be writeable")
+    return p, q, out, V
+
+
+def _ptr(a: np.ndarray):
+    return a.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+
+
 def residual_dist(
     p: np.ndarray,
     q: np.ndarray,
@@ -156,31 +210,22 @@ def residual_dist(
 
     Parameters
     ----------
-    p   : float32 array, shape (V,) — target probabilities
-    q   : float32 array, shape (V,) — draft probabilities
-    out : optional pre-allocated float32 output buffer, shape (V,)
+    p   : array, shape (V,) — target probabilities (converted to float32)
+    q   : array, shape (V,), same dtype as p — draft probabilities
+    out : optional output buffer: writeable, C-contiguous float32, shape (V,).
+          Written in place and returned. Anything else raises ValueError
+          (it is never silently replaced by a copy).
 
     Returns
     -------
     out : float32 array, shape (V,) — residual pmf
+
+    Raises
+    ------
+    ValueError : p/q not 1-D, different lengths or dtypes, or a bad ``out``.
     """
-    p = np.ascontiguousarray(p, dtype=np.float32)
-    q = np.ascontiguousarray(q, dtype=np.float32)
-    if p.shape != q.shape or p.ndim != 1:
-        raise ValueError(f"p and q must be 1-D arrays of equal shape; got {p.shape}, {q.shape}")
-
-    V = p.shape[0]
-    if out is None:
-        out = np.empty(V, dtype=np.float32)
-    else:
-        out = np.ascontiguousarray(out, dtype=np.float32)
-
-    _lib.residual_dist(
-        p.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        q.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        ctypes.c_int64(V),
-    )
+    p, q, out, V = _prepare(p, q, out)
+    _lib.residual_dist(_ptr(p), _ptr(q), _ptr(out), ctypes.c_int64(V))
     return out
 
 
@@ -192,18 +237,9 @@ def residual_dist_c_baseline(
     """Compute residual distribution using the naive C baseline only.
 
     Used in the benchmark harness to isolate the C baseline from the
-    dispatch wrapper. Never routes to the AVX2 kernel.
+    dispatch wrapper. Never routes to the AVX2 kernel. Same arguments,
+    validation and ValueError contract as ``residual_dist``.
     """
-    p = np.ascontiguousarray(p, dtype=np.float32)
-    q = np.ascontiguousarray(q, dtype=np.float32)
-    V = p.shape[0]
-    if out is None:
-        out = np.empty(V, dtype=np.float32)
-
-    _lib.residual_dist_c(
-        p.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        q.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        ctypes.c_int64(V),
-    )
+    p, q, out, V = _prepare(p, q, out)
+    _lib.residual_dist_c(_ptr(p), _ptr(q), _ptr(out), ctypes.c_int64(V))
     return out
