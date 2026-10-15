@@ -1,0 +1,122 @@
+# Create the GitHub Release for a version tag (vX.Y.Z) after that version is
+# on PyPI.
+#
+# Notes: an install line plus the version's section of CHANGELOG.md.
+# Asset: the exact wheel PyPI serves for that version (downloaded, not
+# rebuilt), with its sha256 in the notes.
+#
+# Runs on a pushed v* tag (for tags whose commit already contains this file)
+# or manually. A manual run takes an existing tag, or a new tag plus the
+# commit to tag. The commit must be on main and its pyproject.toml must carry
+# that version. The workflow then creates an annotated tag (message: the
+# CHANGELOG section) before the release. Tags pushed with the workflow's own
+# token do not re-trigger it. Re-running for the same tag updates the notes
+# and replaces the asset.
+name: GitHub Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release, e.g. v0.1.2"
+        required: true
+        type: string
+      commit:
+        description: "Commit to tag if the tag does not exist yet (full SHA, on main)"
+        required: false
+        type: string
+
+permissions:
+  contents: write  # create/edit the release and upload the asset
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      COMMIT: ${{ inputs.commit }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # all of main and all tags
+
+      - name: Resolve the tag (or the commit to tag)
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            git checkout -q "refs/tags/$TAG"
+            echo "NEW_TAG=" >> "$GITHUB_ENV"
+          else
+            test -n "$COMMIT" || { echo "tag $TAG does not exist; pass commit"; exit 1; }
+            git merge-base --is-ancestor "$COMMIT" origin/main \
+              || { echo "$COMMIT is not on main"; exit 1; }
+            git checkout -q "$COMMIT"
+            echo "NEW_TAG=1" >> "$GITHUB_ENV"
+          fi
+          git log -1 --format='releasing %H %s'
+
+      - name: Check tag, pyproject and CHANGELOG agree
+        run: |
+          case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "not a vX.Y.Z tag: $TAG"; exit 1 ;; esac
+          VERSION="${TAG#v}"
+          grep -qx "version = \"$VERSION\"" pyproject.toml \
+            || { echo "pyproject.toml version != $VERSION"; exit 1; }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build release notes from CHANGELOG.md
+        run: |
+          python3 - <<'EOF'
+          import os, re, sys
+          version = os.environ["VERSION"]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)",
+                        text, re.S | re.M)
+          if not m:
+              sys.exit(f"no CHANGELOG.md section for {version}")
+          header = (
+              f"```bash\npip install flashspec-asm-kernel=={version}\n```\n\n"
+              f"PyPI: https://pypi.org/project/flashspec-asm-kernel/{version}/ "
+              "· Linux x86-64, Python >= 3.9, glibc >= 2.17 "
+              "(`py3-none-manylinux2014_x86_64` wheel).\n\n"
+          )
+          body = m.group(1).strip() + "\n"
+          open("notes.md", "w", encoding="utf-8").write(header + body)
+          open("tagmsg.txt", "w", encoding="utf-8").write(
+              f"flashspec-asm-kernel {version}\n\n{body}")
+          EOF
+
+      - name: Fetch the wheel PyPI serves for this version
+        run: |
+          python3 -m pip download --no-deps --only-binary :all: \
+            --python-version 3.12 --platform manylinux2014_x86_64 \
+            -d dist "flashspec-asm-kernel==$VERSION"
+          ls -l dist
+          test "$(find dist -name '*.whl' | wc -l)" -eq 1
+          {
+            echo
+            echo "**Wheel sha256** (identical to the file on PyPI):"
+            echo '```'
+            (cd dist && sha256sum ./*.whl | sed 's# \./# #')
+            echo '```'
+          } >> notes.md
+          cat notes.md
+
+      - name: Create the annotated tag
+        if: env.NEW_TAG == '1'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$COMMIT" -F tagmsg.txt
+          git push origin "refs/tags/$TAG"
+
+      - name: Create or update the release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file notes.md
+            gh release upload "$TAG" dist/*.whl --clobber
+          else
+            gh release create "$TAG" dist/*.whl --verify-tag \
+              --title "$TAG" --notes-file notes.md
+          fi
