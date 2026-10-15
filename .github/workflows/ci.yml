@@ -49,10 +49,15 @@ jobs:
           pip install flashspec hypothesis pytest numpy
           pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
 
-      - name: Build shared object
+      - name: Build shared object (portable flags, as shipped)
         run: make
 
-      - name: Run correctness suite (reference + ASM backends)
+      - name: No AVX in the non-AVX2 code paths
+        run: python scripts/check_fallback_isa.py libflashspec_asm.so
+
+      - name: Run correctness suite (reference + compiled library + loader)
+        env:
+          FLASHSPEC_ASM_REQUIRE_LIB: "1"  # fail, don't skip, if the .so won't load
         run: pytest tests/ -v --tb=short
 
   benchmark:
@@ -79,8 +84,8 @@ jobs:
           pip install flashspec numpy
           pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
 
-      - name: Build shared object
-        run: make
+      - name: Build shared object (-march=native benchmark build, never shipped)
+        run: make bench-native
 
       - name: Run benchmark harness
         run: python bench/bench_harness.py --output bench/results/
@@ -91,49 +96,8 @@ jobs:
           name: benchmark-results
           path: bench/results/
 
+  # Release wheel: manylinux container build, auditwheel repair, ISA check,
+  # and install tests in clean venvs. Runs on every PR, not just on main.
   wheel:
-    name: Build platform wheel (Linux x86_64)
-    runs-on: ubuntu-latest
-    # Only run on pushes to main (not PRs) to avoid burning CI minutes
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install NASM and build tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y nasm
-
-      - name: Install Python build dependencies
-        run: pip install setuptools build wheel auditwheel
-
-      - name: Build .so and wheel
-        run: python build_wheel.py
-
-      - name: Audit wheel (check manylinux compatibility)
-        run: |
-          pip install auditwheel
-          auditwheel show dist/*.whl
-
-      - name: Install and smoke-test wheel
-        run: |
-          pip install dist/*.whl
-          python -c "
-          import flashspec_asm_kernel as asm
-          print('ABI version:', asm.abi_version())
-          print('AVX2 supported:', asm.cpu_supports_avx2())
-          assert asm.abi_version() == 1
-          print('Smoke test: PASSED')
-          "
-
-      - name: Upload wheel artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: flashspec-asm-kernel-wheel
-          path: dist/*.whl
+    name: Wheel
+    uses: ./.github/workflows/wheel.yml

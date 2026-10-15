@@ -2,13 +2,16 @@
  * FlashSpec-ASM — C shim (Phase 2 naive baseline + Phase 4 ABI boundary)
  *
  * Two roles:
- *   1. Phase 2: naive C implementation of residual_dist compiled -O3
- *      -march=native. This is the baseline the ASM kernel must beat.
+ *   1. Phase 2: naive C implementation of residual_dist. Benchmarks build
+ *      it -O3 -march=native (`make bench-native`); that is the baseline the
+ *      ASM kernel must beat. The shipped library builds it for baseline
+ *      x86-64 (`make`), because it is also the fallback on non-AVX2 CPUs.
  *   2. Phase 4: thin wrapper around the ASM kernel that handles stack
  *      alignment, CPUID dispatch, and the ABI versioning check.
  *
- * Build:
- *   cc -O3 -march=native -fPIC -c src/shim.c -I include/ -o build/shim.o
+ * Build (see Makefile):
+ *   shipped:   cc -O3 -march=x86-64 -mtune=generic -fPIC -c src/shim.c ...
+ *   benchmark: cc -O3 -march=native -fPIC -c src/shim.c ...
  *
  * ABI: System V AMD64. This file is compiled by cc, not assembled by NASM,
  * so calling conventions are handled by the compiler.
@@ -32,6 +35,10 @@ int abi_version(void) {
  * Intentionally simple: let -O3 -march=native auto-vectorise.
  * This is the honest compiler-optimised baseline for the benchmark.
  * Do NOT hand-optimise this function — it defeats the comparison.
+ *
+ * This is ALSO the runtime fallback when the CPU lacks AVX2, so the shipped
+ * build must compile it without -march=native: no AVX/AVX-512 instructions
+ * may appear here. scripts/check_fallback_isa.py enforces that in CI.
  * ------------------------------------------------------------------------- */
 void residual_dist_c(
     const float* restrict p,

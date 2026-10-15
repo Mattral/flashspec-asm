@@ -139,11 +139,26 @@ FlashSpec integration architecture (optional `pip install flashspec[asm]`).
 ## Build
 
 ```bash
-# Requirements: nasm ≥ 2.14, cc (gcc or clang), python3
-make          # → libflashspec_asm.so
-make test     # correctness suite (must be green before benchmarking)
-make bench    # three-way benchmark: NumPy vs C vs ASM
-make profile  # re-run Phase 0 profiler
+# Requirements: nasm ≥ 2.10, cc (gcc or clang), python3
+make               # → libflashspec_asm.so, portable flags (what ships)
+make bench-native  # same, but C code built -march=native (benchmarks only)
+make test          # correctness suite (must be green before benchmarking)
+make bench         # three-way benchmark: NumPy vs C vs ASM (uses bench-native)
+make profile       # re-run Phase 0 profiler
+```
+
+`make` compiles the C shim and the C baseline for baseline x86-64, because
+`residual_dist_c` is also the runtime fallback on CPUs without AVX2; only the
+NASM kernel uses AVX, behind the CPUID check. `make bench-native` is for
+benchmarking the strongest compiler baseline and must never be shipped.
+
+### Release wheel
+
+```bash
+scripts/build_wheel.sh   # needs docker → wheelhouse/*-py3-none-manylinux*.whl (manylinux2014 / manylinux_2_17)
+python scripts/check_fallback_isa.py wheelhouse/*.whl   # no AVX outside the kernel
+python -m venv /tmp/v && /tmp/v/bin/pip install wheelhouse/*.whl
+(cd /tmp && /tmp/v/bin/python -I "$OLDPWD/scripts/smoke_test_wheel.py")
 ```
 
 CI (GitHub Actions) assembles, runs the correctness suite on every push and

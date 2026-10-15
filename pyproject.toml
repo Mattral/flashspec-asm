@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flashspec-asm-kernel"
-version = "0.1.0"
+version = "0.1.1"
 description = "AVX2 assembly kernel for the residual distribution in speculative decoding (optional backend for flashspec)"
 readme = "README.md"
 license = "Apache-2.0"
