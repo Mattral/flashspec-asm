@@ -4,7 +4,7 @@ All notable changes to `flashspec-asm-kernel` are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [0.1.1] - unreleased
+## [0.1.1] - 2026-10-15
 
 0.1.0 on PyPI is a source distribution only. Installing it never built the
 shared library, so the installed package could not run anything. 0.1.1 fixes
@@ -56,8 +56,8 @@ signatures and the AVX2 kernel are unchanged.
   (Python 3.9/3.12/3.13, plus glibc 2.17). These tests assert that the
   package and library load from site-packages and that the ASM kernel is
   the dispatched backend.
-- `.github/workflows/release.yml`: a manual-only, disabled publish skeleton
-  gated on the wheel tests.
+- `.github/workflows/release.yml`: manual-only publish to PyPI via trusted
+  publishing (OIDC), gated on the wheel tests.
 
 ### Changed
 - `bindings/python/flashspec_asm.py` re-exports `flashspec_asm_kernel`
