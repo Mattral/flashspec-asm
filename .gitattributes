@@ -1,33 +1,28 @@
 # GitHub Linguist overrides
 # https://github.com/github-linguist/linguist/blob/master/docs/overrides.md
 #
-# This is an Assembly + C project. The Python files are test infrastructure,
-# correctness documentation, and profiling harnesses — not the product.
-# Mark them accordingly so the language bar reflects the actual codebase.
+# This is an Assembly + C project. The kernel is src/kernel_avx2.asm; the C
+# shim, CPUID dispatch and header are the ABI around it. Everything in Python
+# is either a thin ctypes binding or test/build/benchmark tooling, so it is
+# excluded from the language bar. Use globs so new tooling files are covered.
 
-# Core deliverables — counted normally
-src/kernel_avx2.asm    linguist-detectable=true
-src/shim.c             linguist-detectable=true
-src/cpuid.c            linguist-detectable=true
-include/flashspec_asm.h linguist-detectable=true
-bindings/python/flashspec_asm.py linguist-detectable=true
+# Core deliverables: counted
+src/**       linguist-detectable=true
+include/**   linguist-detectable=true
 
-# Correctness infrastructure — mark as documentation
-# These are the ground truth reference and test suite; important but not
-# the language the project is written in.
-reference/reference_op.py        linguist-documentation=true
-tests/test_correctness.py        linguist-documentation=true
-tests/fuzz/fuzz_residual_dist.c  linguist-documentation=true
+# ctypes binding layer: thin glue around the C ABI, not the implementation
+flashspec_asm_kernel/**   linguist-detectable=false
+bindings/**               linguist-detectable=false
 
-# Benchmark and profiling harnesses — generated/tooling
-bench/bench_harness.py   linguist-generated=true
-bench/profile_phase0.py  linguist-generated=true
+# Correctness infrastructure: reference op, pytest suite, C fuzz harness
+reference/**   linguist-documentation=true
+tests/**       linguist-documentation=true
+
+# Build, packaging, CI and benchmark tooling
+scripts/**     linguist-vendored=true
+bench/**       linguist-vendored=true
+setup.py       linguist-vendored=true
+build_wheel.py linguist-vendored=true
 
 # Docs
 docs/**   linguist-documentation=true
-
-# Package config — counted normally
-pyproject.toml linguist-detectable=true
-bindings/python/__init__.py linguist-detectable=true
-flashspec_asm_kernel/__init__.py linguist-detectable=true
-flashspec_asm_kernel/flashspec_asm.py linguist-detectable=true
